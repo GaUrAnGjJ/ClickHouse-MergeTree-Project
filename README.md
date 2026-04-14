@@ -4,9 +4,10 @@
 A deep-dive systems engineering study of ClickHouse's MergeTree storage engine.
 Covers architecture, execution paths, codebase analysis, and real experiments.
 
-##  ClickHouse Versin ##
+##  ClickHouse Version ##
 
 SELECT version(); -- 24.x.x
+
 ## Repository Structure
 
 | Folder | Contents |
