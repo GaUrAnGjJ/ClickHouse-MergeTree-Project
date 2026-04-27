@@ -552,6 +552,9 @@ std::expected<MergeSelectorChoices, SelectMergeFailure> MergeTreeDataMergerMutat
 
 /// parts should be sorted.
 MergeTaskPtr MergeTreeDataMergerMutator::mergePartsToTemporaryPart(
+    // For Experiement 2 : Merge is disable 
+    
+    throw Exception(ErrorCodes::LOGICAL_ERROR, "Merges are disabled for experiment");
     FutureMergedMutatedPartPtr future_part,
     StorageMetadataPtr metadata_snapshot,
     MergeList::Entry * merge_entry,

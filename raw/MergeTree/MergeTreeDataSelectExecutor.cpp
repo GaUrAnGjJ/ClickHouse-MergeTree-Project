@@ -1375,6 +1375,10 @@ void MergeTreeDataSelectExecutor::filterPartsByQueryConditionCache(
 
                                 mark_it = end + 1;
                             }
+
+// Experiement 4 - DATA SKEW (BREAK ORDER BY ASSUMPTION)
+                            mark_ranges.clear();
+                            mark_ranges.emplace_back(0, part->getMarksCount());
                         }
                     }
                     else

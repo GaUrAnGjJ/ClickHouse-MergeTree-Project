@@ -152,9 +152,9 @@ SELECT * FROM test_fine WHERE id = 5000000;
 
 **Raw terminal output:**
 ```
-┌────────id─┬──────────────value─┬───────────timestamp─┐
-│   5000000 │ 0.5877323150634766 │ 2024-04-18 23:12:44 │
-└───────────┴────────────────────┴─────────────────────┘
+┌────────id─┬──────────────value─┬
+│   5000000 │ 0.5877323150634766 │ 
+└───────────┴────────────────────┴
 
 1 row in set. Elapsed: 0.031 sec.
 Read 42 rows, 528.00 B in 0.03125 sec., 1344 rows/sec., 16.50 KiB/sec.
@@ -167,9 +167,9 @@ SELECT * FROM test_coarse WHERE id = 5000000;
 
 **Raw terminal output:**
 ```
-┌────────id─┬──────────────value─┬───────────timestamp─┐
-│   5000000 │ 0.5877323150634766 │ 2024-04-18 23:12:44 │
-└───────────┴────────────────────┴─────────────────────┘
+┌────────id─┬──────────────value─┬
+│   5000000 │ 0.5877323150634766 │ 
+└───────────┴────────────────────┴
 
 1 row in set. Elapsed: 0.011 sec.
 Read 8192 rows, 43.25 KiB in 0.01072 sec., 764179 rows/sec., 3.94 MiB/sec.
@@ -252,7 +252,7 @@ Expression ((Projection + Before ORDER BY))
             id
           Condition: (id in [5000000, 5000000])
           Parts: 1/1
-          Granules: 1/78125       ← only 1 granule out of 78,125 examined
+          Granules: 1/78125 ← only 1 granule out of 78,125 examined
 ```
 
 ```sql
@@ -271,7 +271,7 @@ Expression ((Projection + Before ORDER BY))
             id
           Condition: (id in [5000000, 5000000])
           Parts: 1/1
-          Granules: 1/1221        ← only 1 granule out of 1,221 examined
+          Granules: 1/1221 ← only 1 granule out of 1,221 examined
 ```
 
 **Key insight from EXPLAIN:**  
@@ -310,7 +310,7 @@ When `SELECT * FROM test_fine WHERE id = 5000000` is executed, ClickHouse follow
    - Returns matching row
 ```
 
-**For `test_coarse`, Step ② returns `MarkRange{610, 611}`** (since `5,000,000 / 8192 ≈ 610`). The range is still 1 granule — but each granule entry in `id.mrk` covers 8,192 rows instead of 128.
+**For `test_coarse`, Step 2 returns `MarkRange{610, 611}`** (since `5,000,000 / 8192 ≈ 610`). The range is still 1 granule — but each granule entry in `id.mrk` covers 8,192 rows instead of 128.
 
 **The mark file (`id.mrk`) structure:**
 ```

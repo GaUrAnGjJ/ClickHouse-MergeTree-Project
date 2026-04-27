@@ -94,18 +94,42 @@ void MergeTreeSink::consume(Chunk & chunk)
 
     auto block = getHeader().cloneWithColumns(chunk.getColumns());
 
-    auto deduplication_info = chunk.getChunkInfos().getSafe<DeduplicationInfo>();
-    auto part_blocks = MergeTreeDataWriter::splitBlockIntoParts(std::move(block), max_parts_per_block, metadata_snapshot, context);
+// Perform Experiment 3 : Part Fragmentation 
 
-    using DelayedPartitions = std::vector<MergeTreeDelayedChunk::Partition>;
-    DelayedPartitions partitions;
+    // auto deduplication_info = chunk.getChunkInfos().getSafe<DeduplicationInfo>();
+    // auto part_blocks = MergeTreeDataWriter::splitBlockIntoParts(std::move(block), max_parts_per_block, metadata_snapshot, context);
 
-    const Settings & settings = context->getSettingsRef();
-    size_t total_streams = 0;
-    bool support_parallel_write = false;
+    // using DelayedPartitions = std::vector<MergeTreeDelayedChunk::Partition>;
+    // DelayedPartitions partitions;
 
-    std::vector<UInt128> all_partwriter_hashes;
-    all_partwriter_hashes.reserve(part_blocks.size());
+    // const Settings & settings = context->getSettingsRef();
+    // size_t total_streams = 0;
+    // bool support_parallel_write = false;
+
+    // std::vector<UInt128> all_partwriter_hashes;
+    // all_partwriter_hashes.reserve(part_blocks.size());
+
+    size_t chunk_size = 10000;
+size_t total_rows = block.rows();
+
+for (size_t i = 0; i < total_rows; i += chunk_size)
+{
+    Block sub_block = block.cloneEmpty();
+    size_t end = std::min(i + chunk_size, total_rows);
+
+    for (size_t col_idx = 0; col_idx < block.columns(); ++col_idx)
+    {
+        const auto & col = block.getByPosition(col_idx);
+
+        sub_block.insert({
+            col.column->cut(i, end - i),
+            col.type,
+            col.name
+        });
+    }
+
+    writer.write(sub_block);
+}
 
     for (auto & current_block : part_blocks)
     {

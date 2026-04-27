@@ -61,18 +61,38 @@ size_t MergeTreeIndexGranularity::getLastNonFinalMarkRows() const
 
 void MergeTreeIndexGranularity::addRowsToLastMark(size_t rows_count)
 {
-    if (hasFinalMark())
-    {
-        throw Exception(ErrorCodes::LOGICAL_ERROR, "Cannot add rows to final mark");
-    }
-    else if (empty())
-    {
-        appendMark(rows_count);
-    }
+    // if (hasFinalMark())
+    // {
+    //     throw Exception(ErrorCodes::LOGICAL_ERROR, "Cannot add rows to final mark");
+    // }
+    // else if (empty())
+    // {
+    //     appendMark(rows_count);
+    // }
+    // else
+    // {
+    //     adjustLastMark(getLastMarkRows() + rows_count);
+    // }
+// Experiment 1 - Change Index granularity
+    void MergeTreeIndexGranularity::addRowsToLastMark(size_t rows_count)
+{
+size_t current = empty() ? 0 : getLastMarkRows();
+size_t total = current + rows_count;
+
+while (total >= 128)
+{
+    appendMark(128);
+    total -= 128;
+}
+
+if (total > 0)
+{
+    if (empty())
+        appendMark(total);
     else
-    {
-        adjustLastMark(getLastMarkRows() + rows_count);
-    }
+        adjustLastMark(total);
+}
+}
 }
 
 size_t computeIndexGranularity(
