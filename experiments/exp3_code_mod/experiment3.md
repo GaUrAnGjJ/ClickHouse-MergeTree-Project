@@ -54,8 +54,6 @@ Every row carries `value = 1`. The entire 10-million-row dataset is effectively 
 
 **Observed output:**
 ```
-Ok.
-
 10000000 rows in set. Elapsed: 0.868 sec. Processed 10.00 million rows, 80.00 MB
 (11.52 million rows/s., 92.17 MB/s.)
 Peak memory usage: 24.80 MiB.
@@ -139,26 +137,26 @@ Every granule is a candidate. Binary search returns range `[0, N]` — the full 
 ### Internal execution path
 
 ```
-① InterpreterSelectQuery              [InterpreterSelectQuery.cpp]
+1. InterpreterSelectQuery              [InterpreterSelectQuery.cpp]
    - Parses WHERE value = 1
    - Builds KeyCondition for the primary key (value)
 
-② MergeTreeDataSelectExecutor         [MergeTreeDataSelectExecutor.cpp]
+2. MergeTreeDataSelectExecutor         [MergeTreeDataSelectExecutor.cpp]
    - Calls markRangesFromPKRange(value = 1)
    - Binary-searches sparse index:
        first mark where value could be ≥ 1  → mark 0
        last  mark where value could be ≤ 1  → mark N (end of file)
    - All marks included → mark_ranges = [0, total_marks]
 
-③ MergeTreeRangeReader                [MergeTreeRangeReader.cpp]
+3. MergeTreeRangeReader                [MergeTreeRangeReader.cpp]
    - Reads ALL granules (0 to N) sequentially
    - No granule is pruned
 
-④ MergeTreeReader                     [MergeTreeReader.cpp]
+4. MergeTreeReader                     [MergeTreeReader.cpp]
    - Decompresses .bin data for every granule
    - All 10M rows delivered to the executor
 
-⑤ WHERE filter applied at row level
+5.  WHERE filter applied at row level
    - value = 1 → all 10M rows pass
    - result_rows = 10M
 ```
@@ -222,11 +220,7 @@ Under extreme skew, `markRangesFromPKRange()` correctly computes the answer: all
 | What is the real assumption MergeTree makes? | That the `ORDER BY` column has **sufficient cardinality and distribution** to split the key space meaningfully. |
 | What happens when that assumption breaks? | The engine degrades to a full table scan with zero index benefit, regardless of how many rows could theoretically be skipped. |
 
-**Viva Answer:**
 
-> "MergeTree's primary index is a sparse index over the `ORDER BY` column. Its pruning power depends entirely on data variance in that column. When data is skewed — for example, all rows have `value = 1` — the binary search over the index resolves to `[0, end]` because every granule's minimum value satisfies the predicate. No granule is eliminated. `read_rows` equals the full table size. This is scan amplification caused by distribution failure, not a bug in the index code itself — the index answered correctly, it just had nothing useful to say."
-
----
 
 ## References
 

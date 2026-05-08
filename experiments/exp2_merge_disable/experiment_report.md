@@ -53,7 +53,6 @@ FROM numbers(10000000);
 
 **Terminal output:**
 ```
-Ok.
 0 rows in set. Elapsed: 2.134 sec. Processed 10.00 million rows, 80.00 MB
 (4.69 million rows/sec., 37.49 MB/sec.)
 ```
@@ -80,7 +79,7 @@ FROM test_merge
 WHERE id > 4000000;
 ```
 
-**Terminal output (Query id: `769df1fe-df06-47cf-8cc8-ab464406c129`):**
+**Terminal output:**
 ```
 ┌───────sum(value)─┐
 │ 4297613894856190 │ -- 4.30 quadrillion
@@ -294,10 +293,10 @@ Peak memory usage: 4.62 MiB.
 When ClickHouse executes `SELECT sum(value) FROM test_merge WHERE id > 4000000`:
 
 ```
-① InterpreterSelectQuery          [InterpreterSelectQuery.cpp]
+1. InterpreterSelectQuery --> [InterpreterSelectQuery.cpp]
    - Parses AST, pushes down WHERE predicate
 
-② MergeTreeDataSelectExecutor    [MergeTreeDataSelectExecutor.cpp]
+2. MergeTreeDataSelectExecutor --> [MergeTreeDataSelectExecutor.cpp]
    - ::read() iterates over ALL active data parts
    - For each part:
        → Loads the part's primary index (.idx) into memory
@@ -306,15 +305,15 @@ When ClickHouse executes `SELECT sum(value) FROM test_merge WHERE id > 4000000`:
        → If marks found → adds to read pipeline
        → If no marks found → part is skipped (but file open cost is paid)
 
-③ MergeTreeRangeReader           [MergeTreeRangeReader.cpp]
+3. MergeTreeRangeReader --> [MergeTreeRangeReader.cpp]
    - Reads granules for each qualifying part
    - With 264 parts: this loop runs 264 times, mostly returning empty results
 
-④ MergeTreeReader                [MergeTreeReader.cpp]
+4. MergeTreeReader --> [MergeTreeReader.cpp]
    - Opens .mrk and .bin files per part per column
    - With 264 parts: 264 × 2 columns = 528 file opens
 
-⑤ Aggregation: sum(value) accumulated across all parts
+5. Aggregation: sum(value) accumulated across all parts
 ```
 
 **With 1 merged part:**

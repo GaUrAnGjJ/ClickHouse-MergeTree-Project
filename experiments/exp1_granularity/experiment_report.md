@@ -22,6 +22,7 @@ Two identical tables are created. The **only** difference is `index_granularity`
 
 ```sql
 -- Fine-grained: one index mark every 128 rows
+-- SET index_granularity = 128
 CREATE TABLE test_fine
 (
     id        UInt64,
@@ -30,11 +31,12 @@ CREATE TABLE test_fine
 )
 ENGINE = MergeTree()
 ORDER BY id
-SETTINGS index_granularity = 128;
+
 ```
 
 ```sql
 -- Coarse-grained: one index mark every 8192 rows (ClickHouse default)
+-- SET index_granularity = 8192
 CREATE TABLE test_coarse
 (
     id        UInt64,
@@ -43,7 +45,7 @@ CREATE TABLE test_coarse
 )
 ENGINE = MergeTree()
 ORDER BY id
-SETTINGS index_granularity = 8192;
+
 ```
 
 **Verification — confirm settings were applied:**
@@ -77,7 +79,6 @@ FROM numbers(10000000);
 
 **Terminal output:**
 ```
-Ok.
 0 rows in set. Elapsed: 3.241 sec. Processed 10.00 million rows, 80.00 MB (3.09 million rows/sec., 24.68 MB/sec.)
 ```
 
@@ -92,7 +93,6 @@ FROM numbers(10000000);
 
 **Terminal output:**
 ```
-Ok.
 0 rows in set. Elapsed: 2.891 sec. Processed 10.00 million rows, 80.00 MB (3.46 million rows/sec., 27.67 MB/sec.)
 ```
 
@@ -107,11 +107,11 @@ Before running any query, I inspected what ClickHouse actually stored on disk fo
 ```sql
 SELECT
     table,
-    sum(rows)                           AS total_rows,
-    formatReadableSize(sum(data_compressed_bytes))   AS compressed_size,
-    formatReadableSize(sum(data_uncompressed_bytes)) AS uncompressed_size,
-    formatReadableSize(sum(marks_bytes))             AS marks_size,
-    sum(marks)                          AS total_marks
+    sum(rows)AS total_rows,
+    formatReadableSize(sum(data_compressed_bytes))AS compressed_size,
+    formatReadableSize(sum(data_uncompressed_bytes))AS uncompressed_size,
+    formatReadableSize(sum(marks_bytes))AS marks_size,
+    sum(marks)AS total_marks
 FROM system.parts
 WHERE table IN ('test_fine', 'test_coarse')
   AND active = 1
@@ -135,8 +135,8 @@ This directly confirms: **finer granularity = more marks = more memory used for 
 
 **Computing the expected mark counts manually:**
 ```
-test_fine  : 10,000,000 / 128  = 78,125 marks  ✓
-test_coarse: 10,000,000 / 8192 ≈  1,221 marks  ✓
+test_fine  : 10,000,000 / 128  = 78,125 marks  
+test_coarse: 10,000,000 / 8192 ≈  1,221 marks 
 ```
 
 ---
@@ -288,21 +288,21 @@ The sparse index is equally "precise" in terms of granule count — but the coar
 When `SELECT * FROM test_fine WHERE id = 5000000` is executed, ClickHouse follows this path:
 
 ```
-① InterpreterSelectQuery         [InterpreterSelectQuery.cpp]
+1. InterpreterSelectQuery --> [InterpreterSelectQuery.cpp]
    - Parses AST, resolves columns, builds pipeline
 
-② MergeTreeDataSelectExecutor   [MergeTreeDataSelectExecutor.cpp]
+2. MergeTreeDataSelectExecutor --> [MergeTreeDataSelectExecutor.cpp]
    - Iterates over active data parts
    - Calls markRangesFromPKRange()
      → Binary-searches the in-memory sparse index (.idx file)
      → Finds: granule #39,062 contains id=5,000,000
      → Returns MarkRange{begin=39062, end=39063}
 
-③ MergeTreeRangeReader          [MergeTreeRangeReader.cpp]
+3. MergeTreeRangeReader -->[MergeTreeRangeReader.cpp]
    - Receives MarkRange{39062, 39063}
    - Reads exactly that one granule
 
-④ MergeTreeReader               [MergeTreeReader.cpp]
+4. MergeTreeReader --> [MergeTreeReader.cpp]
    - Opens id.mrk → reads entry #39062 → gets (compressed_offset, block_offset)
    - Seeks to that byte position in id.bin
    - Decompresses the block (LZ4/ZSTD)
