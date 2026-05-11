@@ -107,12 +107,11 @@ This table summarizes every modification made to the ClickHouse C++ source durin
 | Component | Requirement |
 |-----------|-------------|
 | Operating System | Linux (Ubuntu 20.04+) or macOS. Windows users should use **WSL2**. |
-| RAM | Minimum 4 GB; 8 GB or more strongly recommended for building |
-| Disk Space | ~70 GB free (ClickHouse source + build artifacts + experiment data) |
+| RAM | Minimum 6 GB; 8 GB or more strongly recommended for building |
+| Disk Space |** ~70 GB** free (ClickHouse source + build artifacts + experiment data) |
 | Tools | `git`, `cmake`, `ninja`, `clang-14` |
-| Build Time | Approximately 30–60 minutes on a modern machine |
+| Build Time | Initial build time takes around **12-14 hr** and after that approximately **45–60 minutes** on each build |
 
----
 
 ## Clone the Repository
 
