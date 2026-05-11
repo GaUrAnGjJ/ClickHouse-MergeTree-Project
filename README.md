@@ -1,4 +1,4 @@
-# 🔍 Cracking Open ClickHouse's MergeTree Engine
+# Open ClickHouse's MergeTree Engine
 
 ![DA-IICT](https://img.shields.io/badge/DA--IICT-Big%20Data%20Engineering-blue?style=flat)
 ![Semester](https://img.shields.io/badge/Semester-2-blue?style=flat)
@@ -26,7 +26,7 @@ It is built around three core principles:
 
 ## What We Actually Did
 
-### 📖 Phase 1 — Read the Source Code
+### Phase 1 — Read the Source Code
 
 We analyzed the `src/Storages/MergeTree/` directory of the ClickHouse source and traced two critical code paths:
 
@@ -35,7 +35,7 @@ We analyzed the `src/Storages/MergeTree/` directory of the ClickHouse source and
 
 Every function call, file handoff, and design decision is documented in [`code-notes/`](code-notes/).
 
-### 🧪 Phase 2 — Break Things on Purpose
+### Phase 2 — Break Things on Purpose
 
 We modified the ClickHouse C++ source directly to disable or alter core engine behaviors, then measured the impact on query performance using `system.query_log`.
 
@@ -46,7 +46,7 @@ We modified the ClickHouse C++ source directly to disable or alter core engine b
 | **Exp 3: Data Skew** | *(No code change)* | Inserted 10M rows all with `value = 1` (identical primary key) |
 | **Exp 4: Disable PK Pruning** | `MergeTreeDataSelectExecutor.cpp` | Hardcoded `key_condition_useful = false` in `markRangesFromPKRange()` |
 
-### 🩻 Phase 3 — The Autopsy
+### Phase 3 — The Autopsy
 
 Every surprising result was traced back to the exact C++ function that caused it. Every apparent "bug" turned out to be a deliberate design trade-off, documented in [`code-notes/concept_mapping.md`](code-notes/concept_mapping.md).
 
@@ -102,7 +102,7 @@ This table summarizes every modification made to the ClickHouse C++ source durin
 
 ## System Requirements
 
-> ⚠️ **Warning:** Building ClickHouse from source requires significant resources. If you only want to run Experiment 3 (data skew — no code change), use the stock Docker image.
+>  **Warning:** Building ClickHouse from source requires significant resources. If you only want to run Experiment 3 (data skew — no code change), use the stock Docker image.
 
 | Component | Requirement |
 |-----------|-------------|
@@ -122,7 +122,7 @@ git clone https://github.com/GaUrAnGjJ/ClickHouse-MergeTree-Project.git
 cd ClickHouse-MergeTree-Project
 
 # Initialize and pull the ClickHouse source submodule
-# ⚠️ This step can take 12–14 hours depending on your internet speed
+# This step can take 12–14 hours depending on your internet speed
 git submodule update --init --recursive
 ```
 
@@ -184,7 +184,7 @@ Full SQL scripts, exact terminal output, and conclusions are documented in each 
 
 ---
 
-## 📊 Experiment Results
+## Experiment Results
 
 <br/>
 
