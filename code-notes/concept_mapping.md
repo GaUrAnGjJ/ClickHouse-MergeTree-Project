@@ -257,6 +257,8 @@ Gets turned into: `[id IN RANGE(4000000, 5000000)]`
 
 **Why it matters:** If `KeyCondition` can't understand your `WHERE` clause (returns `FUNCTION_UNKNOWN`), the engine has to do a full table scan. The smarter `KeyCondition` is, the fewer granules get read.
 
+**Experiment connection:** In Experiment 4, we manually disabled primary key pruning by hardcoding `key_condition_useful = false` in `MergeTreeDataSelectExecutor.cpp`. This forced the engine to skip the sparse index evaluation completely, resulting in 5 million rows being read instead of just 1.
+
 ---
 
 ### 3.9 Background Merging
@@ -539,9 +541,10 @@ flowchart TD
 
 | Concept | Experiment | What We Proved |
 |---------|-----------|---------------|
-| **Granularity** | Exp 1 (index_granularity) | Granularity 128 reads 42 rows vs 8192 reads 8192 rows for a single-row result. Granularity = minimum I/O unit. |
+| **Granularity** | Exp 1 (index_granularity) | Granularity 128 reads 128 rows vs 8192 reads 8192 rows for a single-row result. Granularity = minimum I/O unit. |
 | **Background Merge** | Exp 2 (merge disable) | Disabling merges caused 264 parts → 121× slower queries. Each part costs a file-open + index-load + binary-search cycle. |
 | **Sparse Index + Data Skew** | Exp 3 (data skew) | When all rows have the same key value, the sparse index can't skip anything → full table scan despite the index existing. |
+| **Primary Key Pruning** | Exp 4 (disable pk pruning) | Disabling `key_condition_useful` bypasses the index entirely, forcing a 5-million-row full table scan for a 1-row lookup. |
 | **Immutable Parts** | Exp 2 | INSERT latency stayed constant (~0.089s) regardless of part count — because writes never touch existing parts. |
 | **Part State Machine** | Exp 2 | After `OPTIMIZE TABLE FINAL`, 264 parts collapsed to 3. Source parts moved Outdated → Deleted. |
 

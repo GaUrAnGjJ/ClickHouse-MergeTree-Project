@@ -1,174 +1,305 @@
 # 🔍 Cracking Open ClickHouse's MergeTree Engine
 
-> *We took a database engine that processes billions of rows per second, ripped open its source code (305 files), ran experiments that broke it on purpose, and documented everything we learned.*
+![DA-IICT](https://img.shields.io/badge/DA--IICT-Big%20Data%20Engineering-blue?style=flat)
+![Semester](https://img.shields.io/badge/Semester-2-blue?style=flat)
+![ClickHouse](https://img.shields.io/badge/Topic-ClickHouse-informational?style=flat)
+![Built From Source](https://img.shields.io/badge/Built%20From-Source-blue?style=flat)
+![Status](https://img.shields.io/badge/Status-Complete-success?style=flat)
 
-This is not a tutorial. This is a **reverse-engineering journal** — a semester-long investigation into how ClickHouse's MergeTree storage engine actually works under the hood, told through the code we read, the experiments we ran, and the failures that taught us the most.
+> Not a tutorial. Not documentation. A reverse-engineering journal of how one of the world's fastest database engines actually works — from source code to broken experiments.
 
 ---
 
-## The Story in 60 Seconds
+## What is MergeTree?
 
-It started with a simple question: *"How does ClickHouse scan 10 million rows faster than most databases scan 10 thousand?"*
+MergeTree is the default storage engine of ClickHouse — one of the fastest analytical databases in the world. It is designed for processing hundreds of millions to billions of rows per second.
 
-The answer, we discovered, lives in three architectural bets that ClickHouse made — and that most databases didn't:
+It is built around three core principles:
 
-1. **Parts are immutable.** Once data hits disk, it's never modified. Updates? Rewrite the entire part. This sounds insane until you realize it eliminates every lock, every WAL entry, and every page-level conflict.
-
-2. **The index is deliberately imprecise.** One index entry per 8,192 rows instead of one per row. The primary index for a billion-row table fits in ~1 MB of RAM. The trade-off? A point query must read at least 8,192 rows to find one.
-
-3. **Merging happens in the background.** Every INSERT creates a new folder. A background crew quietly combines small folders into big ones. If that crew stops? We found out. Queries became **121× slower.**
-
-We proved each of these by breaking the system on purpose.
+| Principle | What It Means |
+|-----------|---------------|
+| **Immutable Parts** | Every `INSERT` creates a new folder on disk. Data is never modified in place — updates rewrite the entire block. |
+| **Sparse Primary Index** | One index entry is stored for every 8,192 rows instead of every row. The entire index for 1 billion rows fits in just ~1 MB of RAM. |
+| **Background Merges** | Small parts created by inserts are continuously merged into larger ones by background workers, keeping read performance fast. |
 
 ---
 
 ## What We Actually Did
 
-### 📖 Phase 1: Read the Source Code
+### 📖 Phase 1 — Read the Source Code
 
-We cloned 305 source files from ClickHouse's `MergeTree/` directory and traced two paths through the code:
+We analyzed the `src/Storages/MergeTree/` directory of the ClickHouse source and traced two critical code paths:
 
-- **The INSERT path** — from SQL parser → interpreter → sort block → write columns → atomic rename
-- **The SELECT path** — from SQL parser → load sparse index → binary search → read granules → filter rows
+- **The INSERT path:** SQL Parser → Interpreter → Sort Block by ORDER BY → Write Columns to `.bin` / `.mrk` → Atomic Rename to Active Part
+- **The SELECT path:** SQL Parser → Load Sparse Index → Binary Search via `KeyCondition` → Read Granules → Decompress → Filter Rows → Return Result
 
-Every function call, every file handoff, every design decision is documented with code snippets and explanations in plain English.
+Every function call, file handoff, and design decision is documented in [`code-notes/`](code-notes/).
 
-### 🧪 Phase 2: Run Experiments That Break Things
+### 🧪 Phase 2 — Break Things on Purpose
 
-| Experiment | What We Did | What Broke |
+We modified the ClickHouse C++ source directly to disable or alter core engine behaviors, then measured the impact on query performance using `system.query_log`.
+
+| Experiment | Source File Modified | What We Changed |
 |---|---|---|
-| **[Exp 1: Granularity](experiments/exp1_granularity/experiment_report.md)** | Compared `index_granularity = 128` vs `8192` on 10M rows | The "precise" table read 42 rows but was **2.9× slower** than the "imprecise" one that read 8,192 rows |
-| **[Exp 2: Part Explosion](experiments/exp2_merge_disable/experiment_report.md)** | Disabled background merges, created 264 separate parts | Queries became **121× slower**. The engine processed 71M rows from a 36M row table. |
-| **[Exp 3: Data Skew](experiments/exp3_code_mod/experiment3.md)** | Inserted 10M rows where every single value was identical | The primary index existed, loaded, ran a binary search — and achieved absolutely nothing. Full table scan. |
+| **Exp 1: Index Granularity** | `MergeTreeSettings.cpp` | Changed default `index_granularity` from `8192` → `128` |
+| **Exp 2: Disable Merges** | `MergeTreeDataMergerMutator.cpp` | Modified the error message in `selectPartsToMerge()` to trace the experiment — merges were blocked by running `SYSTEM STOP MERGES` |
+| **Exp 3: Data Skew** | *(No code change)* | Inserted 10M rows all with `value = 1` (identical primary key) |
+| **Exp 4: Disable PK Pruning** | `MergeTreeDataSelectExecutor.cpp` | Hardcoded `key_condition_useful = false` in `markRangesFromPKRange()` |
 
-### 🩻 Phase 3: Perform the Autopsy
+### 🩻 Phase 3 — The Autopsy
 
-Every surprise from the experiments was traced back to the source code. Every "bug" turned out to be a feature. We documented 10 failures, ranked them by severity, and mapped each one to the exact function in the codebase where it originates.
+Every surprising result was traced back to the exact C++ function that caused it. Every apparent "bug" turned out to be a deliberate design trade-off, documented in [`code-notes/concept_mapping.md`](code-notes/concept_mapping.md).
 
 ---
 
-## Repository Map
+## Repository Structure
 
 ```
 ClickHouse-MergeTree-Project/
 │
-├── 📁 raw/MergeTree/                    # 305 source files from ClickHouse
-│   ├── MergeTreeData.cpp                #   (475 KB — the biggest file)
-│   ├── MergeTreeDataSelectExecutor.cpp  #   (the SELECT engine)
-│   ├── MergeTreeDataWriter.cpp          #   (the INSERT engine)
-│   ├── MutateTask.cpp                   #   (UPDATE/DELETE — rewrites entire parts)
-│   ├── KeyCondition.cpp                 #   (216 KB — WHERE clause → index lookup)
-│   └── ...301 more files
+├── 📁 raw/                              # ClickHouse source code (cloned via submodule)
+│   └── ClickHouse/
+│       └── src/Storages/MergeTree/      # The C++ source files we analyzed
 │
-├── 📁 code-notes/                       # Our analysis documents
-│   ├── execution_flow.md                #   INSERT path — 5 steps, code-traced
-│   ├── design_decisions.md              #   Why immutability, sparse index, async merges
-│   ├── concept_mapping.md               #   20 concepts → source files → plain English
-│   └── failure_analysis.md              #   10 failures ranked, explained, and mapped to code
+├── 📁 code-notes/                       # Our analysis and documentation
+│   ├── concept_mapping.md               # 20+ concepts mapped to source files
+│   ├── design_decisions.md              # Why ClickHouse made each architectural choice
+│   ├── execution_flow.md                # INSERT and SELECT code paths, step by step
+│   └── failure_analysis.md              # Failure modes mapped to source code
 │
 ├── 📁 experiments/
-│   ├── exp1_granularity/                #   Granularity 128 vs 8192 — the sniper vs shotgun test
-│   │   └── experiment_report.md
-│   ├── exp2_merge_disable/              #   264 parts — the part explosion experiment
-│   │   └── experiment_report.md
-│   └── exp3_code_mod/                   #   Data skew — the index that worked but achieved nothing
-│       └── experiment3.md
+│   ├── exp1_granularity/
+│   │   └── exp_granularity.md           # Granularity 128 vs 8192 — full report
+│   ├── exp2_merge_disable/
+│   │   └── exp2_merge_disable.md        # Background merge disabling — full report
+│   ├── exp3_code_mod/
+│   │   └── exp3_data_skew.md            # Data skew with identical key values — full report
+│   └── exp4_primary_key_disable/
+│       └── exp4_primary_key_disable.md  # Primary key pruning disabled — full report
 │
-├── 📁 diagrams/                         #   Architecture and flow diagrams
-└── 📁 report/                           #   Final project report
+├── 📁 diagrams/
+│   └── execution_pipeline.md            # Full write → merge → read pipeline diagram
+│
+├── 📁 Screenshots/
+│   └── Visualization/                   # Chart images for each experiment result
+│
+└── README.md
 ```
 
 ---
 
-## The Numbers That Surprised Us
+## Source Code Changes — What We Modified and Why
 
-```
-┌─────────────────────────────────────────────────────────────────┐
-│  42          Rows read by a "precise" index for 1 matching row  │
-│              (we expected 128)                                   │
-│                                                                  │
-│  121×        Slowdown from 264 unmerged parts vs 1 merged part   │
-│                                                                  │
-│  71,000,000  Rows "processed" from a table with only 36,400,000 │
-│                                                                  │
-│  ~1 MB       Index size for 1 BILLION rows (sparse index magic)  │
-│                                                                  │
-│  0           Granules pruned when every row has the same value    │
-│                                                                  │
-│  200 GB      I/O cost of changing 1 row in a 100 GB part         │
-│              (read old + write new)                               │
-│                                                                  │
-│  18.4 sec    Time to merge 264 parts back into 3                 │
-│              (the cost of skipping background merges)             │
-└─────────────────────────────────────────────────────────────────┘
-```
+This table summarizes every modification made to the ClickHouse C++ source during the project.
+
+| File | Location in Source | Original Behavior | Our Modification | Experiment |
+|------|--------------------|-------------------|------------------|------------|
+| `MergeTreeSettings.cpp` | `src/Storages/MergeTree/` | `DECLARE(UInt64, index_granularity, 8192, ...)` — default granularity is 8192 rows per index mark | Changed the value to `128` so the compiled binary creates one index mark per 128 rows by default | **Exp 1** |
+| `MergeTreeDataMergerMutator.cpp` | `src/Storages/MergeTree/` | `selectPartsToMerge()` selects candidate parts and returns merge failure with message `"No parts satisfy preconditions for merge"` | Changed the failure explanation message to `"Background merges disabled for experiment"` to identify the blocked merge path; background merges were also stopped via `SYSTEM STOP MERGES` | **Exp 2** |
+| `MergeTreeDataSelectExecutor.cpp` | `src/Storages/MergeTree/` | `bool key_condition_useful = !key_condition.alwaysUnknownOrTrue();` — evaluates the WHERE clause to decide if the sparse index can prune granules | Hardcoded to `bool key_condition_useful = false;` inside `markRangesFromPKRange()`, forcing the engine to skip all index evaluation and read every granule | **Exp 4** |
 
 ---
 
-## Document Guide — Where to Start
+## System Requirements
 
-**If you want to understand the architecture:**
-→ Start with [`execution_flow.md`](code-notes/execution_flow.md) — traces an INSERT from SQL to disk in 5 steps
+> ⚠️ **Warning:** Building ClickHouse from source requires significant resources. If you only want to run Experiment 3 (data skew — no code change), use the stock Docker image.
 
-**If you want to understand *why* the architecture is the way it is:**
-→ Read [`design_decisions.md`](code-notes/design_decisions.md) — compares MergeTree's choices against PostgreSQL, InnoDB, and RocksDB
-
-**If you want a map of the codebase:**
-→ Open [`concept_mapping.md`](code-notes/concept_mapping.md) — 20 concepts, each linked to source files with plain-English explanations
-
-**If you want the most interesting part:**
-→ Read [`failure_analysis.md`](code-notes/failure_analysis.md) — 10 failures, ranked by severity, each with an analogy, a code trail, and a lesson learned
-
-**If you want to see the raw evidence:**
-→ Jump into the [`experiments/`](experiments/) folder — every claim in this project has terminal output to back it up
+| Component | Requirement |
+|-----------|-------------|
+| Operating System | Linux (Ubuntu 20.04+) or macOS. Windows users should use **WSL2**. |
+| RAM | Minimum 4 GB; 8 GB or more strongly recommended for building |
+| Disk Space | ~70 GB free (ClickHouse source + build artifacts + experiment data) |
+| Tools | `git`, `cmake`, `ninja`, `clang-14` |
+| Build Time | Approximately 30–60 minutes on a modern machine |
 
 ---
 
-## How to Reproduce
+## Clone the Repository
 
 ```bash
-# 1. Start ClickHouse in Docker
-docker run -d --name clickhouse-server \
-  --platform linux/amd64 \
-  -p 8123:8123 -p 9000:9000 \
-  clickhouse/clickhouse-server:latest
+# Clone this project
+git clone https://github.com/GaUrAnGjJ/ClickHouse-MergeTree-Project.git
+cd ClickHouse-MergeTree-Project
 
-# 2. Connect to the client
-docker exec -it clickhouse-server clickhouse-client
-
-# 3. Run any experiment
-#    → SQL scripts are embedded in each experiment_report.md
-#    → Copy-paste and follow along
+# Initialize and pull the ClickHouse source submodule
+# ⚠️ This step can take 12–14 hours depending on your internet speed
+git submodule update --init --recursive
 ```
 
 ---
 
-## Key Lessons (The Short Version)
+## Build Instructions
 
-| # | Lesson | The Hard Way We Learned It |
-|---|--------|---------------------------|
-| 1 | **Background merges are load-bearing** | Disabling them made queries 121× slower |
-| 2 | **The sparse index is a hint, not a GPS** | It says *which 8,192-row block*, not *which row* |
-| 3 | **An index is only as useful as its data** | Cardinality of 1 = decoration, not optimization |
-| 4 | **`read_rows` > wall-clock time** | The "slower" table actually did 195× less wasted work |
-| 5 | **Immutability is a feature, not a limitation** | No locks, no WAL, no corruption — but mutations hurt |
-| 6 | **Every INSERT creates a folder** | 1 row per INSERT = 1 folder per INSERT = disaster |
+> These steps are required only if you want to reproduce **Experiments 1, 2, or 4**, which involve modifying the ClickHouse C++ source code.
+
+```bash
+# Step 1 — Install build dependencies (Ubuntu)
+sudo apt-get install -y cmake ninja-build clang-14 libssl-dev
+
+# Step 2 — Navigate into the ClickHouse source directory
+cd raw/ClickHouse
+
+# Step 3 — Apply the source code modification for your chosen experiment
+# (See each experiment's report file for the exact lines to change)
+
+# Step 4 — Create the build directory and compile
+mkdir -p build && cd build
+cmake .. -DCMAKE_BUILD_TYPE=RelWithDebInfo -G Ninja
+ninja clickhouse-server clickhouse-client
+```
+
+> **Important:** Before building for a new experiment, revert any changes from the previous one to avoid interference between results.
+> ```bash
+> git checkout -- src/Storages/MergeTree/
+> ```
 
 ---
 
-## Tech Stack
+## Run Locally
 
-| Component | Version / Tool |
-|-----------|---------------|
-| ClickHouse | Latest (`clickhouse/clickhouse-server:latest`) |
-| Deployment | Docker (linux/amd64) |
-| Source Analysis | 305 files from `src/Storages/MergeTree/` |
-| Documentation | Markdown + Mermaid diagrams |
-| Experiments | ClickHouse SQL client + `system.query_log` |
+```bash
+# Start the custom-built ClickHouse server
+./clickhouse server --config-file=/etc/clickhouse-server/config.xml &
+
+# Connect to the server using the client
+clickhouse-client --host 127.0.0.1 --port 9000
+
+# Verify the server is running
+SELECT version();
+```
+
 
 ---
 
-## Authors
+## Running Each Experiment
 
-**Het Katrodiya & Gaurang Jadav**
-Big Data Engineering Project — DA-IICT, Semester 2
+Full SQL scripts, exact terminal output, and conclusions are documented in each experiment's report file.
+
+| Experiment | Report File | What Was Tested |
+|---|---|---|
+| **Exp 1: Index Granularity** | [`exp_granularity.md`](experiments/exp1_granularity/exp_granularity.md) | Custom binary with `index_granularity = 128`. Point query on `id = 777777` in a 10M-row table. Compared `read_rows`, `read_bytes`, and `query_duration_ms` between granularity 128 and 8192. |
+| **Exp 2: Disable Merges** | [`exp2_merge_disable.md`](experiments/exp2_merge_disable/exp2_merge_disable.md) | Background merges disabled. 5 separate inserts created 5 unmerged parts. Confirmed accumulation via `system.parts`, then recovered using `OPTIMIZE TABLE merge_exp.parts_test FINAL`. |
+| **Exp 3: Data Skew** | [`exp3_data_skew.md`](experiments/exp3_code_mod/exp3_data_skew.md) | Inserted 10M rows with `value = 1` into a table ordered by `value`. Query `WHERE value = 1` read all 10M rows — zero granule pruning despite the index existing. |
+| **Exp 4: Disable PK Pruning** | [`exp4_primary_key_disable.md`](experiments/exp4_primary_key_disable/exp4_primary_key_disable.md) | Custom binary with `key_condition_useful = false`. Point query `WHERE id = 4242424` on a 5M-row table. Read 5,000,000 rows and 40 MB to return 1 result row. |
+
+---
+
+## 📊 Experiment Results
+
+<br/>
+
+**Exp 1 — Index Granularity (128 vs 8192)**
+<img src="Screenshots/Visualization/ex1.PNG" alt="Exp 1: Index Granularity comparison chart" height="350" style="display:block; margin: 5px 0;" />
+
+<br/>
+
+**Exp 2 — Background Merges Disabled**
+<img src="Screenshots/Visualization/ex2.PNG" alt="Exp 2: Background Merges disabled chart" height="350" style="display:block; margin: 5px 0;" />
+
+<br/>
+
+**Exp 3 — Data Skew (identical primary key values)**
+<img src="Screenshots/Visualization/ex3.PNG" alt="Exp 3: Data skew chart" height="350" style="display:block; margin: 5px 0;" />
+
+<br/>
+
+**Exp 4 — Primary Key Pruning Disabled**
+<img src="Screenshots/Visualization/ex4.PNG" alt="Exp 4: Primary key pruning disabled chart" height="350" style="display:block; margin: 5px 0;" />
+
+---
+
+## Failure Analysis
+
+### Build conflicts between experiments
+
+Each experiment requires a different source code modification. Before rebuilding for a new experiment, revert all previous changes:
+
+```bash
+cd raw/ClickHouse
+git checkout -- src/Storages/MergeTree/
+```
+
+### Query log shows no data
+
+ClickHouse writes query logs asynchronously. Flush them manually before querying:
+
+```sql
+SYSTEM FLUSH LOGS;
+
+SELECT read_rows, query_duration_ms
+FROM system.query_log
+WHERE type = 'QueryFinish'
+ORDER BY event_time DESC
+LIMIT 5;
+```
+
+### Query results appear cached (numbers don't change between runs)
+
+Drop the mark and uncompressed caches before each benchmark run:
+
+```sql
+SYSTEM DROP MARK CACHE;
+SYSTEM DROP UNCOMPRESSED CACHE;
+```
+
+### Wrong working directory during build
+
+- Source file edits must be made inside `raw/ClickHouse/src/Storages/MergeTree/`
+- The `ninja` build command must be run from inside `raw/ClickHouse/build/`
+- Do not edit files inside the `build/` directory — those are generated files
+
+---
+
+## Numbers That Surprised Us
+
+| Finding | Value | Experiment |
+|---------|-------|------------|
+| Rows read for 1 result (granularity 128) | **128 rows** | Exp 1 — `test_fine`, `id = 777777` |
+| Bytes read for 1 result (granularity 128) | **~1.7 KB** | Exp 1 — vs 188 KB with default granularity |
+| Rows read for 1 result (granularity 8192) | **8,192 rows** | Exp 1 — `test_coarse`, `id = 777777` |
+| Query slower with smaller granularity | **30 ms vs 16 ms (1.9× slower)** | Exp 1 — more index marks = more binary search hops |
+| Active parts after inserts with merges disabled | **5 parts** | Exp 2 — `merge_exp.parts_test` |
+| Active parts after `OPTIMIZE TABLE FINAL` | **1 part** | Exp 2 — merged back in 0.017 sec |
+| Rows read with identical key (10M rows) | **10,000,000 (full scan)** | Exp 3 — zero granule pruning |
+| Granules pruned on skewed data | **0** | Exp 3 — index exists but cannot eliminate anything |
+| Rows read to return 1 result (PK pruning off) | **5,000,000** | Exp 4 — `pruning_exp.pk_test`, `id = 4242424` |
+| Bytes read to return 1 result (PK pruning off) | **40 MB** | Exp 4 — full table scan |
+| Query duration with PK pruning off | **65 ms** | Exp 4 — vs sub-millisecond with pruning on |
+
+---
+
+## Conclusion
+
+This project reverse-engineered the ClickHouse MergeTree engine by reading 305 source files, modifying three core C++ functions, and running four controlled experiments. Each experiment was designed to isolate and expose one fundamental architectural property of the engine.
+
+| Experiment | Property Exposed | Observed Impact |
+|---|---|---|
+| Exp 1: Index Granularity | Granule is the minimum I/O unit | Changing 8192 → 128 reduced bytes read by 99% but made queries 1.9× slower |
+| Exp 2: Disable Merges | Part count directly controls query cost | 5 unmerged parts accumulated — `OPTIMIZE TABLE FINAL` reduced them back to 1 |
+| Exp 3: Data Skew | Index utility depends on data cardinality | 10M rows with identical key read all 10M rows — 0 granules pruned |
+| Exp 4: PK Pruning Disabled | Sparse index is the foundation of read performance | 5M-row full scan (40 MB, 65 ms) to return 1 row |
+
+MergeTree's performance is not magic — it is the product of three tightly coupled mechanisms: immutable sorted parts, a sparse index for granule pruning, and background merges to control part count. When any one of these breaks, performance degrades measurably and predictably. Every "limitation" we found turned out to be a deliberate trade-off.
+
+---
+
+## Tech Stack, Authors & Mentor
+
+### Tech Stack
+
+| Component | Details |
+|-----------|---------|
+| Database Engine | ClickHouse (built from source) |
+| Deployment | Docker (`linux/amd64`) |
+| Build System | CMake 3.20+ · Ninja · Clang 14 |
+| Documentation | Markdown · Mermaid diagrams |
+| Query Analysis | ClickHouse SQL client · `system.query_log` |
+
+### Authors
+
+**Gaurang Jadav & Het Katrodiya**  
+Big Data Engineering — DA-IICT, Semester 2
+
+### Mentor
+
+**Prof. Ankush Chander**
