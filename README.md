@@ -57,17 +57,17 @@ Every surprising result was traced back to the exact C++ function that caused it
 ```
 ClickHouse-MergeTree-Project/
 │
-├── 📁 raw/                              # ClickHouse source code (cloned via submodule)
+├── raw/                              # ClickHouse source code (cloned via submodule)
 │   └── ClickHouse/
 │       └── src/Storages/MergeTree/      # The C++ source files we analyzed
 │
-├── 📁 code-notes/                       # Our analysis and documentation
+├── code-notes/                       # Our analysis and documentation
 │   ├── concept_mapping.md               # 20+ concepts mapped to source files
 │   ├── design_decisions.md              # Why ClickHouse made each architectural choice
 │   ├── execution_flow.md                # INSERT and SELECT code paths, step by step
 │   └── failure_analysis.md              # Failure modes mapped to source code
 │
-├── 📁 experiments/
+├── experiments/
 │   ├── exp1_granularity/
 │   │   └── exp_granularity.md           # Granularity 128 vs 8192 — full report
 │   ├── exp2_merge_disable/
@@ -77,10 +77,10 @@ ClickHouse-MergeTree-Project/
 │   └── exp4_primary_key_disable/
 │       └── exp4_primary_key_disable.md  # Primary key pruning disabled — full report
 │
-├── 📁 diagrams/
+├── diagrams/
 │   └── execution_pipeline.md            # Full write → merge → read pipeline diagram
 │
-├── 📁 Screenshots/
+├── Screenshots/
 │   └── Visualization/                   # Chart images for each experiment result
 │
 └── README.md
